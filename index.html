@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jeremy 隨機直式偵探</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@900&family=Roboto+Mono:wght@700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
+        .math-font { font-family: 'Roboto Mono', monospace; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const VerticalMath = () => {
+            const [problem, setProblem] = useState(null);
+            const [subStep, setSubStep] = useState('ones'); // 'ones' (個位) 或 'tens' (十位)
+            const [selectedAnswer, setSelectedAnswer] = useState(null);
+            const [isCorrect, setIsCorrect] = useState(null);
+
+            // 生成隨機題目與隨機挖空位置
+            const generateProblem = () => {
+                const isAddition = Math.random() > 0.5;
+                const symbol = isAddition ? '+' : '-';
+                
+                // 確保題目適合小一/小二：兩位數運算
+                let n1, n2, result;
+                if (isAddition) {
+                    n1 = Math.floor(Math.random() * 40) + 10;
+                    n2 = Math.floor(Math.random() * 40) + 10;
+                    result = n1 + n2;
+                } else {
+                    n1 = Math.floor(Math.random() * 50) + 40;
+                    n2 = Math.floor(Math.random() * 30) + 10;
+                    result = n1 - n2;
+                }
+
+                const data = {
+                    t1: Math.floor(n1 / 10), o1: n1 % 10,
+                    t2: Math.floor(n2 / 10), o2: n2 % 10,
+                    r1: Math.floor(result / 10), r2: result % 10,
+                    symbol
+                };
+
+                // --- 核心邏輯：隨機選擇挖空位置 ---
+                // 個位列候選：o1, o2, r2 | 十位列候選：t1, t2, r1
+                const onesCandidates = ['o1', 'o2', 'r2'];
+                const tensCandidates = ['t1', 't2', 'r1'];
+                
+                const onesBlank = onesCandidates[Math.floor(Math.random() * 3)];
+                const tensBlank = tensCandidates[Math.floor(Math.random() * 3)];
+
+                setProblem({ ...data, onesBlank, tensBlank });
+                setSubStep('ones');
+                setSelectedAnswer(null);
+                setIsCorrect(null);
+            };
+
+            useEffect(() => { generateProblem(); }, []);
+
+            const handleAnswer = (val) => {
+                const correctAnswer = subStep === 'ones' 
+                    ? problem[problem.onesBlank] 
+                    : problem[problem.tensBlank];
+
+                if (parseInt(val) === correctAnswer) {
+                    if (subStep === 'ones') {
+                        setSubStep('tens');
+                        setSelectedAnswer(null);
+                    } else {
+                        setIsCorrect(true);
+                    }
+                } else {
+                    setIsCorrect(false);
+                }
+            };
+
+            if (!problem) return null;
+
+            // 輔助組件：渲染格子
+            const DigitBox = ({ type, value, posKey }) => {
+                const isTarget = (subStep === 'ones' && problem.onesBlank === posKey) || 
+                                 (subStep === 'tens' && problem.tensBlank === posKey);
+                const isFilled = (subStep === 'tens' && problem.onesBlank === posKey) || 
+                                 (isCorrect && problem.tensBlank === posKey);
+
+                let bgColor = "bg-white border-slate-200";
+                let textColor = "text-slate-800";
+                let content = value;
+
+                if (isTarget) {
+                    bgColor = "bg-amber-50 border-amber-400 animate-pulse";
+                    content = "?";
+                    textColor = "text-amber-600";
+                } else if (isFilled) {
+                    bgColor = "bg-green-50 border-green-200";
+                    textColor = "text-green-600";
+                } else if (problem.onesBlank === posKey || problem.tensBlank === posKey) {
+                    // 尚未輪到的空格
+                    bgColor = "bg-slate-100 border-slate-200";
+                    content = ""; 
+                }
+
+                return (
+                    <div className={`w-16 h-20 flex items-center justify-center border-2 rounded-xl text-5xl font-black math-font transition-all ${bgColor} ${textColor}`}>
+                        {content}
+                    </div>
+                );
+            };
+
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen p-4">
+                    <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 w-full max-w-md">
+                        <h2 className="text-2xl font-black text-center mb-8 text-slate-700">🔍 隨機直式解密</h2>
+                        
+                        {/* 直式 UI */}
+                        <div className="grid grid-cols-3 gap-2 items-center justify-items-center mb-10">
+                            {/* 第一行 */}
+                            <div />
+                            <DigitBox value={problem.t1} posKey="t1" />
+                            <DigitBox value={problem.o1} posKey="o1" />
+                            
+                            {/* 第二行 */}
+                            <div className="text-4xl font-bold text-slate-400">{problem.symbol}</div>
+                            <DigitBox value={problem.t2} posKey="t2" />
+                            <DigitBox value={problem.o2} posKey="o2" />
+                            
+                            {/* 底線 */}
+                            <div className="col-span-3 w-full border-b-8 border-slate-800 my-2 rounded-full" />
+                            
+                            {/* 結果行 */}
+                            <div />
+                            <DigitBox value={problem.r1} posKey="r1" />
+                            <DigitBox value={problem.r2} posKey="r2" />
+                        </div>
+
+                        {/* 按鈕選擇區 */}
+                        <div className="grid grid-cols-5 gap-2">
+                            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                                <button
+                                    key={num}
+                                    onClick={() => handleAnswer(num)}
+                                    className="aspect-square bg-indigo-600 text-white rounded-xl text-2xl font-black hover:bg-indigo-700 active:scale-90 transition-all"
+                                >
+                                    {num}
+                                </button>
+                            ))}
+                        </div>
+
+                        {isCorrect && (
+                            <button 
+                                onClick={generateProblem}
+                                className="w-full mt-8 bg-green-500 text-white py-4 rounded-2xl font-black text-xl shadow-lg animate-bounce"
+                            >
+                                下一題 ➔
+                            </button>
+                        )}
+                        {isCorrect === false && <p className="text-center text-red-500 font-black mt-4">再試試看！</p>}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<VerticalMath />);
+    </script>
+</body>
+</html>
