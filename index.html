@@ -1,1 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jeremy 進階直式挑戰 V2.1</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&family=Roboto+Mono:wght@500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f0f9ff; touch-action: manipulation; }
+        .math-font { font-family: 'Roboto Mono', monospace; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
+    <script type="text/babel">
+        const { useState, useEffect, useRef, memo } = React;
+
+        const TOTAL_QUESTIONS = 10;
+
+        // --- 1. 獨立的計時器組件 (避免影響主畫面渲染) ---
+        const TimerDisplay = ({ startTime, onTimeUpdate }) => {
+            const [time, setTime] = useState(0);
+
+            useEffect(() => {
+                if (!startTime) return;
+                const interval = setInterval(() => {
+                    const now = Math.floor((Date.now() - startTime) / 1000);
+                    setTime(now);
+                    if (onTimeUpdate) onTimeUpdate(now);
+                }, 1000);
+                return () => clearInterval(interval);
+            }, [startTime, onTimeUpdate]);
+
+            return (
+                <span className="font-mono text-slate-400 font-bold">
+                    {Math.floor(time / 60)}:{(time % 60).toString().padStart(2, '0')}
+                </span>
+            );
+        };
+
+        // --- 2. 單個數字格組件 (移出 App 外部) ---
+        const DigitSlot = ({ q, type, row, userInputs, mode, onInput }) => {
+            const key = `${type}_${row}`;
+            const isBlank = q.blanks.includes(key);
+            const value = q.digits[key];
+
+            // 視覺優化：若百位數為0 (且該數值本身小於100)，隱藏它
+            // 這裡簡單判定：如果是 't' (十位) 且值為 0，且該位置不是必須填寫的空格，則隱藏
+            if (value === 0 && row === 't' && !isBlank) {
+                 // 檢查這是否真的是一個個位數 (例如 05)
+                 // 由於題目生成邏輯，我們簡單隱藏非空格的 leading zero
+                 return <div className="w-12 h-14"></div>;
+            }
+
+            if (isBlank) {
+                const inputValue = userInputs[key] || '';
+                // Retry模式：若已答對(等於正確答案)，則鎖定
+                const isCorrect = inputValue === value.toString();
+                const isLocked = mode === 'retry' && isCorrect;
+                
+                let borderClass = "border-blue-400 border-2 bg-white";
+                // Retry模式下，未鎖定(即錯誤或未填)的格子閃爍提示
+                if (mode === 'retry' && !isLocked) borderClass = "border-orange-400 border-4 bg-orange-50 animate-pulse"; 
+                if (isLocked) borderClass = "border-green-500 bg-green-50 text-green-600 border-2";
+
+                return (
+                    <input 
+                        type="tel" 
+                        value={inputValue}
+                        readOnly={isLocked}
+                        onChange={(e) => onInput(key, e.target.value)}
+                        className={`w-12 h-14 text-center text-3xl font-bold rounded-lg shadow-inner outline-none transition-all math-font ${borderClass}`}
+                    />
+                );
+            } else {
+                return (
+                    <div className="w-12 h-14 flex items-center justify-center text-4xl font-black text-slate-700 math-font">
+                        {value}
+                    </div>
+                );
+            }
+        };
+
+        // --- 3. 問題卡片組件 (移出 App 外部) ---
+        const QuestionCard = ({ q, index, userInputs, mode, feedback, onInput, onSubmit, startTime }) => {
+            // 防止 q 為空時報錯
+            if (!q) return null;
+
+            return (
+                <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-xl border border-slate-200 max-w-md mx-auto fade-in">
+                    <div className="flex justify-between items-center mb-8 border-b pb-4">
+                        <span className="bg-slate-100 text-slate-600 px-4 py-1 rounded-full text-sm font-bold">
+                            第 {index + 1} / {TOTAL_QUESTIONS} 題
+                        </span>
+                        {/* 這裡引用獨立的 TimerDisplay */}
+                        <TimerDisplay startTime={startTime} />
+                    </div>
+
+                    <div className="flex flex-col items-center">
+                        <div className="grid grid-cols-[2rem_3.5rem_3.5rem] gap-y-2 gap-x-1 items-center">
+                            {/* N1 */}
+                            <div></div>
+                            <DigitSlot q={q} type="n1" row="t" userInputs={userInputs} mode={mode} onInput={onInput} />
+                            <DigitSlot q={q} type="n1" row="o" userInputs={userInputs} mode={mode} onInput={onInput} />
+
+                            {/* Op1 N2 */}
+                            <div className="text-3xl font-bold text-slate-400 text-center">{q.op1}</div>
+                            <DigitSlot q={q} type="n2" row="t" userInputs={userInputs} mode={mode} onInput={onInput} />
+                            <DigitSlot q={q} type="n2" row="o" userInputs={userInputs} mode={mode} onInput={onInput} />
+
+                            {/* Line 1 */}
+                            <div className="col-span-3 h-1 bg-slate-800 rounded-full my-1"></div>
+
+                            {/* R1 */}
+                            <div></div>
+                            <DigitSlot q={q} type="r1" row="t" userInputs={userInputs} mode={mode} onInput={onInput} />
+                            <DigitSlot q={q} type="r1" row="o" userInputs={userInputs} mode={mode} onInput={onInput} />
+
+                            {/* Op2 N3 */}
+                            <div className="text-3xl font-bold text-slate-400 text-center">{q.op2}</div>
+                            <DigitSlot q={q} type="n3" row="t" userInputs={userInputs} mode={mode} onInput={onInput} />
+                            <DigitSlot q={q} type="n3" row="o" userInputs={userInputs} mode={mode} onInput={onInput} />
+
+                            {/* Line 2 */}
+                            <div className="col-span-3 h-1 bg-slate-800 rounded-full my-1"></div>
+
+                            {/* R2 */}
+                            <div></div>
+                            <DigitSlot q={q} type="r2" row="t" userInputs={userInputs} mode={mode} onInput={onInput} />
+                            <DigitSlot q={q} type="r2" row="o" userInputs={userInputs} mode={mode} onInput={onInput} />
+                        </div>
+                    </div>
+
+                    <div className="mt-8 min-h-[4rem]">
+                        {feedback && (
+                            <div className={`p-4 rounded-xl text-center font-bold text-lg animate-bounce ${feedback.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                                {feedback.msg}
+                            </div>
+                        )}
+                    </div>
+
+                    {mode === 'normal' && (
+                        <button 
+                            onClick={onSubmit}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-2xl font-black py-4 rounded-2xl shadow-lg transition-all active:scale-95"
+                        >
+                            提交答案
+                        </button>
+                    )}
+                    {mode === 'retry' && (
+                        <div className="text-center text-slate-400 text-sm font-bold">
+                            正在訂正模式：請填寫閃爍的格子
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- 4. 報告卡片組件 ---
+        const ReportCard = ({ history, totalTime, onRestart }) => {
+            const wrongQuestions = history.filter(h => !h.passedFirstTry);
+            const score = Math.round(((TOTAL_QUESTIONS - wrongQuestions.length) / TOTAL_QUESTIONS) * 100);
+
+            return (
+                <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-2xl mx-auto text-center fade-in">
+                    <h2 className="text-4xl font-black text-slate-800 mb-6">測驗完成！</h2>
+                    
+                    <div className="flex justify-center gap-6 mb-10">
+                        <div className="bg-blue-50 p-6 rounded-2xl">
+                            <p className="text-xs text-blue-400 font-bold uppercase">總時間</p>
+                            <p className="text-3xl font-black text-blue-900">{totalTime} 秒</p>
+                        </div>
+                        <div className="bg-indigo-50 p-6 rounded-2xl">
+                            <p className="text-xs text-indigo-400 font-bold uppercase">分數</p>
+                            <p className="text-4xl font-black text-indigo-900">{score}</p>
+                        </div>
+                    </div>
+
+                    <div className="text-left mb-10">
+                        <h3 className="text-xl font-bold text-slate-700 mb-4 border-b pb-2">表現分析：</h3>
+                        {wrongQuestions.length === 0 ? (
+                            <p className="text-green-600 font-bold text-lg text-center">🎉 太強了！全部答對！</p>
+                        ) : (
+                            <ul className="space-y-4 max-h-64 overflow-y-auto custom-scrollbar">
+                                {wrongQuestions.map((q, i) => (
+                                    <li key={i} className="bg-red-50 p-4 rounded-xl border border-red-100">
+                                        <div className="font-bold text-red-800 mb-1">第 {q.id + 1} 題需複習：</div>
+                                        <div className="font-mono text-slate-600 text-lg">
+                                            {q.n1} {q.op1} {q.n2} = {q.r1} <br/>
+                                            {q.r1} {q.op2} {q.n3} = {q.r2}
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+
+                    <button onClick={onRestart} className="bg-slate-800 text-white px-8 py-4 rounded-2xl font-black text-xl hover:bg-slate-700 w-full">
+                        返回主選單
+                    </button>
+                </div>
+            );
+        };
+
+        // --- 5. 主應用程式 (管理狀態) ---
+        const App = () => {
+            const [step, setStep] = useState('menu');
+            const [qIndex, setQIndex] = useState(0);
+            const [questions, setQuestions] = useState([]);
+            const [userInputs, setUserInputs] = useState({});
+            const [mode, setMode] = useState('normal'); 
+            const [feedback, setFeedback] = useState(null);
+            const [history, setHistory] = useState([]);
+            const [startTime, setStartTime] = useState(null);
+            const [finalTime, setFinalTime] = useState(0);
+
+            // 隨機數生成邏輯
+            const generateQuestions = () => {
+                let newQs = [];
+                for(let i=0; i<TOTAL_QUESTIONS; i++) {
+                    let n1, n2, n3, r1, r2, op1, op2;
+                    let valid = false;
+                    while(!valid) {
+                        n1 = Math.floor(Math.random() * 89) + 10; 
+                        op1 = Math.random() > 0.5 ? '+' : '-';
+                        n2 = Math.floor(Math.random() * 40) + 1;  
+                        
+                        r1 = op1 === '+' ? n1 + n2 : n1 - n2;
+                        if (r1 > 99 || r1 < 10) continue; 
+
+                        op2 = Math.random() > 0.5 ? '+' : '-';
+                        n3 = Math.floor(Math.random() * 40) + 1;
+                        r2 = op2 === '+' ? r1 + n3 : r1 - n3;
+                        if (r2 > 0 && r2 < 100) valid = true; 
+                    }
+
+                    const digits = {
+                        'n1_t': Math.floor(n1 / 10), 'n1_o': n1 % 10,
+                        'n2_t': Math.floor(n2 / 10), 'n2_o': n2 % 10,
+                        'r1_t': Math.floor(r1 / 10), 'r1_o': r1 % 10,
+                        'n3_t': Math.floor(n3 / 10), 'n3_o': n3 % 10,
+                        'r2_t': Math.floor(r2 / 10), 'r2_o': r2 % 10,
+                    };
+
+                    const blankCount = Math.floor(Math.random() * 3) + 2; 
+                    const allKeys = Object.keys(digits);
+                    const shuffledKeys = allKeys.sort(() => 0.5 - Math.random());
+                    const blanks = shuffledKeys.slice(0, blankCount);
+
+                    newQs.push({ id: i, n1, n2, n3, r1, r2, op1, op2, digits, blanks });
+                }
+                return newQs;
+            };
+
+            const startQuiz = () => {
+                setQuestions(generateQuestions());
+                setQIndex(0);
+                setHistory([]);
+                setUserInputs({});
+                setMode('normal');
+                setFeedback(null);
+                setStep('quiz');
+                setStartTime(Date.now());
+            };
+
+            const handleInput = (key, val) => {
+                const num = val.slice(-1).replace(/[^0-9]/g, '');
+                
+                if (mode === 'normal') {
+                    setUserInputs(prev => ({ ...prev, [key]: num }));
+                } else if (mode === 'retry') {
+                    const currentQ = questions[qIndex];
+                    const correctVal = currentQ.digits[key].toString();
+                    
+                    if (num === correctVal) {
+                        setUserInputs(prev => ({ ...prev, [key]: num }));
+                        setFeedback({ type: 'success', msg: '正確！請填下一格。' });
+                        const remaining = currentQ.blanks.filter(b => b !== key && userInputs[b] !== currentQ.digits[b].toString());
+                        if (remaining.length === 0) {
+                            setTimeout(() => nextQuestion(), 800);
+                        }
+                    } else {
+                        let hint = "再算一次看看？";
+                        if (key.includes('_o')) hint = "提示：先算個位數 (最右邊)。";
+                        if (key.includes('_t')) hint = "提示：留意進位或退位！";
+                        setFeedback({ type: 'error', msg: `不對喔！${hint}` });
+                    }
+                }
+            };
+
+            const submitNormal = () => {
+                const currentQ = questions[qIndex];
+                let allCorrect = true;
+                
+                currentQ.blanks.forEach(key => {
+                    if (userInputs[key] !== currentQ.digits[key].toString()) {
+                        allCorrect = false;
+                    }
+                });
+
+                if (allCorrect) {
+                    setHistory([...history, { ...currentQ, passedFirstTry: true }]);
+                    nextQuestion();
+                } else {
+                    setMode('retry');
+                    setUserInputs({});
+                    setFeedback({ type: 'error', msg: '哎呀！有地方算錯了。我們重新來一次！' });
+                    
+                    let newHistory = [...history];
+                    const existing = newHistory.find(h => h.id === currentQ.id);
+                    if (!existing) {
+                        newHistory.push({ ...currentQ, passedFirstTry: false });
+                    }
+                    setHistory(newHistory);
+                }
+            };
+
+            const nextQuestion = () => {
+                if (qIndex < TOTAL_QUESTIONS - 1) {
+                    setQIndex(prev => prev + 1);
+                    setUserInputs({});
+                    setMode('normal');
+                    setFeedback(null);
+                } else {
+                    setFinalTime(Math.floor((Date.now() - startTime) / 1000));
+                    setStep('report');
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
+                    {step === 'menu' && (
+                        <div className="text-center bg-white p-12 rounded-[3rem] shadow-2xl max-w-lg w-full">
+                            <h1 className="text-4xl font-black text-slate-800 mb-4">兩步直式特訓</h1>
+                            <p className="text-slate-500 mb-8 font-bold">格式：34 + 12 - 14 (連續運算)</p>
+                            <div className="space-y-4 text-left bg-slate-50 p-6 rounded-2xl mb-8 border border-slate-100">
+                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">1</span> 隨機 2-4 個空格</p>
+                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">2</span> 全部填完才按提交</p>
+                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">3</span> 答錯會有即時引導</p>
+                            </div>
+                            <button onClick={startQuiz} className="w-full bg-indigo-600 text-white py-6 rounded-2xl text-3xl font-black shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
+                                開始挑戰
+                            </button>
+                        </div>
+                    )}
+
+                    {step === 'quiz' && (
+                        <QuestionCard 
+                            q={questions[qIndex]} 
+                            index={qIndex}
+                            userInputs={userInputs}
+                            mode={mode}
+                            feedback={feedback}
+                            onInput={handleInput}
+                            onSubmit={submitNormal}
+                            startTime={startTime}
+                        />
+                    )}
+
+                    {step === 'report' && (
+                        <ReportCard 
+                            history={history} 
+                            totalTime={finalTime} 
+                            onRestart={() => setStep('menu')} 
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
