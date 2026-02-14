@@ -2,48 +2,103 @@
 <html lang="zh-HK">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jeremy 進階直式挑戰 V3.0 (嚴格邏輯版)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#f0f9ff">
+    
+    <title>Jeremy 直式挑戰 (終極版)</title>
+    
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&family=Roboto+Mono:wght@500;700&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f0f9ff; touch-action: manipulation; }
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f0f9ff; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
         .math-font { font-family: 'Roboto Mono', monospace; }
         input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* 防止 iOS safari 在橫向時放大字體 */
+        html { -webkit-text-size-adjust: 100%; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef, useCallback } = React;
+        const { useState, useEffect, useRef, useCallback, memo } = React;
 
         const TOTAL_QUESTIONS = 10;
 
+        // --- 音效助手 (使用 Base64 內嵌短音效) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // 簡單的音效產生器 (避免依賴外部檔案)
+        const playSound = (type) => {
+            // 由於瀏覽器限制，必須在用戶交互後才能播放聲音。
+            // 這裡使用簡單的振盪器模擬，實際應用可替換為高品質 base64 音頻
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            if (type === 'success') {
+                // 清脆的叮咚聲
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+                oscillator.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.1); // G5
+                gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.05);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 0.4);
+            } else if (type === 'error') {
+                // 溫和的錯誤提示聲
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(300, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.05);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 0.3);
+            } else if (type === 'win') {
+                // 簡單的慶祝聲
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+                oscillator.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.2); // E5
+                oscillator.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.4); // G5
+                gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 1);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 1);
+            }
+        };
+
         // --- 獨立計時器 (防止閃爍) ---
-        const TimerDisplay = ({ startTime, onTimeUpdate }) => {
+        const TimerDisplay = memo(({ startTime }) => {
             const [time, setTime] = useState(0);
             useEffect(() => {
                 if (!startTime) return;
                 const interval = setInterval(() => {
-                    const now = Math.floor((Date.now() - startTime) / 1000);
-                    setTime(now);
-                    if (onTimeUpdate) onTimeUpdate(now);
+                    setTime(Math.floor((Date.now() - startTime) / 1000));
                 }, 1000);
                 return () => clearInterval(interval);
-            }, [startTime, onTimeUpdate]);
+            }, [startTime]);
 
             return (
                 <span className="font-mono text-slate-400 font-bold">
                     {Math.floor(time / 60)}:{(time % 60).toString().padStart(2, '0')}
                 </span>
             );
-        };
+        });
 
         // --- 單個數字格 ---
         const DigitSlot = ({ q, type, row, userInputs, mode, onInput }) => {
@@ -51,7 +106,6 @@
             const isBlank = q.blanks.includes(key);
             const value = q.digits[key];
 
-            // 視覺優化：隱藏十位數的 0 (例如 05 -> 5)，除非它是答案格
             if (value === 0 && row === 't' && !isBlank) {
                  return <div className="w-12 h-14"></div>;
             }
@@ -59,7 +113,6 @@
             if (isBlank) {
                 const inputValue = userInputs[key] || '';
                 const isCorrect = inputValue === value.toString();
-                // Retry 模式下，答對的鎖定為綠色
                 const isLocked = mode === 'retry' && isCorrect;
                 
                 let borderClass = "border-blue-400 border-2 bg-white";
@@ -157,13 +210,34 @@
             );
         };
 
-        // --- 報告卡片 ---
+        // --- 報告卡片 (整合慶祝動畫與音效) ---
         const ReportCard = ({ history, totalTime, onRestart }) => {
             const wrongQuestions = history.filter(h => !h.passedFirstTry);
             const score = Math.round(((TOTAL_QUESTIONS - wrongQuestions.length) / TOTAL_QUESTIONS) * 100);
 
+            // 滿分慶祝效果
+            useEffect(() => {
+                if (score === 100) {
+                    playSound('win');
+                    // 發射五彩紙屑
+                    const duration = 3 * 1000;
+                    const animationEnd = Date.now() + duration;
+                    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+
+                    function randomInRange(min, max) { return Math.random() * (max - min) + min; }
+
+                    const interval = setInterval(function() {
+                        const timeLeft = animationEnd - Date.now();
+                        if (timeLeft <= 0) return clearInterval(interval);
+                        const particleCount = 50 * (timeLeft / duration);
+                        confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+                        confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+                    }, 250);
+                }
+            }, [score]);
+
             return (
-                <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-2xl mx-auto text-center fade-in">
+                <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-2xl mx-auto text-center fade-in relative z-10">
                     <h2 className="text-4xl font-black text-slate-800 mb-6">測驗完成！</h2>
                     <div className="flex justify-center gap-6 mb-10">
                         <div className="bg-blue-50 p-6 rounded-2xl">
@@ -172,13 +246,15 @@
                         </div>
                         <div className="bg-indigo-50 p-6 rounded-2xl">
                             <p className="text-xs text-indigo-400 font-bold uppercase">分數</p>
-                            <p className="text-4xl font-black text-indigo-900">{score}</p>
+                            <p className={`text-4xl font-black ${score === 100 ? 'text-indigo-600 animate-pulse' : 'text-indigo-900'}`}>{score}</p>
                         </div>
                     </div>
                     <div className="text-left mb-10">
                         <h3 className="text-xl font-bold text-slate-700 mb-4 border-b pb-2">表現分析：</h3>
                         {wrongQuestions.length === 0 ? (
-                            <p className="text-green-600 font-bold text-lg text-center">🎉 太強了！全部答對！</p>
+                            <div className="text-green-600 font-black text-xl text-center py-8 bg-green-50 rounded-2xl border-2 border-dashed border-green-300">
+                                🏆 太強了！Jeremy 全部答對！
+                            </div>
                         ) : (
                             <ul className="space-y-4 max-h-64 overflow-y-auto custom-scrollbar">
                                 {wrongQuestions.map((q, i) => (
@@ -193,7 +269,7 @@
                             </ul>
                         )}
                     </div>
-                    <button onClick={onRestart} className="bg-slate-800 text-white px-8 py-4 rounded-2xl font-black text-xl hover:bg-slate-700 w-full">
+                    <button onClick={onRestart} className="bg-slate-800 text-white px-8 py-4 rounded-2xl font-black text-xl hover:bg-slate-700 w-full active:scale-95 transition-all">
                         返回主選單
                     </button>
                 </div>
@@ -212,33 +288,26 @@
             const [startTime, setStartTime] = useState(null);
             const [finalTime, setFinalTime] = useState(0);
 
-            // *** 核心修復：具有唯一解驗證的題目生成器 ***
+            // *** 核心邏輯：唯一解驗證題目生成器 ***
             const generateQuestions = useCallback(() => {
                 let newQs = [];
                 for(let i=0; i<TOTAL_QUESTIONS; i++) {
                     let validPuzzle = false;
                     let puzzleData = null;
-
-                    // 嘗試生成直到找到一個符合所有邏輯的題目
                     while(!validPuzzle) {
-                        // 1. 生成基本數字
                         let n1, n2, n3, r1, r2, op1, op2;
                         let validNums = false;
-                        
                         while(!validNums) {
                             n1 = Math.floor(Math.random() * 89) + 10; 
                             op1 = Math.random() > 0.5 ? '+' : '-';
                             n2 = Math.floor(Math.random() * 40) + 1;  
-                            
                             r1 = op1 === '+' ? n1 + n2 : n1 - n2;
                             if (r1 > 99 || r1 < 10) continue; 
-
                             op2 = Math.random() > 0.5 ? '+' : '-';
                             n3 = Math.floor(Math.random() * 40) + 1;
                             r2 = op2 === '+' ? r1 + n3 : r1 - n3;
                             if (r2 > 0 && r2 < 100) validNums = true; 
                         }
-
                         const digits = {
                             'n1_t': Math.floor(n1 / 10), 'n1_o': n1 % 10,
                             'n2_t': Math.floor(n2 / 10), 'n2_o': n2 % 10,
@@ -246,47 +315,25 @@
                             'n3_t': Math.floor(n3 / 10), 'n3_o': n3 % 10,
                             'r2_t': Math.floor(r2 / 10), 'r2_o': r2 % 10,
                         };
-
-                        // 2. 智能挖空邏輯 (Smart Masking)
-                        // 定義四組約束關係 (Constraints)，每組代表一個直行的運算
-                        // 規則：每一組裡面，最多只能有 1 個空格
                         const constraints = [
-                            ['n1_o', 'n2_o', 'r1_o'], // 第一步：個位
-                            ['n1_t', 'n2_t', 'r1_t'], // 第一步：十位
-                            ['r1_o', 'n3_o', 'r2_o'], // 第二步：個位
-                            ['r1_t', 'n3_t', 'r2_t']  // 第二步：十位
+                            ['n1_o', 'n2_o', 'r1_o'], ['n1_t', 'n2_t', 'r1_t'],
+                            ['r1_o', 'n3_o', 'r2_o'], ['r1_t', 'n3_t', 'r2_t']
                         ];
-
                         const allKeys = Object.keys(digits);
                         const shuffledKeys = allKeys.sort(() => 0.5 - Math.random());
                         let currentBlanks = [];
-                        
-                        // 嘗試添加空格
                         for (let key of shuffledKeys) {
-                            // 暫時加入這個空格
                             const testBlanks = [...currentBlanks, key];
-                            
-                            // 檢查是否違反「唯一解」原則
-                            // 檢查每一組約束，如果某組內的空格數 > 1，則此空格無效
                             const isAmbiguous = constraints.some(group => {
                                 const blanksInGroup = group.filter(k => testBlanks.includes(k));
                                 return blanksInGroup.length > 1;
                             });
-
-                            if (!isAmbiguous) {
-                                currentBlanks.push(key);
-                            }
-                            
-                            // 限制最多 4 格，最少 2 格
+                            if (!isAmbiguous) currentBlanks.push(key);
                             if (currentBlanks.length >= 4) break;
                         }
-
                         if (currentBlanks.length >= 2) {
                             validPuzzle = true;
-                            puzzleData = { 
-                                id: i, n1, n2, n3, r1, r2, op1, op2, 
-                                digits, blanks: currentBlanks 
-                            };
+                            puzzleData = { id: i, n1, n2, n3, r1, r2, op1, op2, digits, blanks: currentBlanks };
                         }
                     }
                     newQs.push(puzzleData);
@@ -295,6 +342,9 @@
             }, []);
 
             const startQuiz = () => {
+                // 首次點擊時嘗試喚醒音頻上下文 (解決瀏覽器自動播放限制)
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                
                 setQuestions(generateQuestions());
                 setQIndex(0);
                 setHistory([]);
@@ -315,16 +365,16 @@
                     const correctVal = currentQ.digits[key].toString();
                     
                     if (num === correctVal) {
+                        playSound('success'); // 播放正確音效
                         setUserInputs(prev => ({ ...prev, [key]: num }));
                         setFeedback({ type: 'success', msg: '正確！請填下一格。' });
-                        // 檢查本題是否剩餘未填
                         const remaining = currentQ.blanks.filter(b => b !== key && userInputs[b] !== currentQ.digits[b].toString());
                         if (remaining.length === 0) {
                             setTimeout(() => nextQuestion(), 500);
                         }
                     } else {
+                        playSound('error'); // 播放錯誤音效
                         let hint = "再算一次看看？";
-                        // 簡單提示邏輯
                         if (key.includes('_o')) hint = "提示：先算個位數 (最右邊)。";
                         else hint = "提示：留意有沒有進位或退位？";
                         setFeedback({ type: 'error', msg: `不對喔！${hint}` });
@@ -334,34 +384,30 @@
 
             const submitNormal = () => {
                 const currentQ = questions[qIndex];
-                let allCorrect = true;
-                
-                // 檢查是否所有格都已填
                 const allFilled = currentQ.blanks.every(key => userInputs[key] && userInputs[key].length > 0);
                 if (!allFilled) {
                     setFeedback({ type: 'error', msg: '還有格子沒填喔！' });
+                    playSound('error');
                     return;
                 }
 
+                let allCorrect = true;
                 currentQ.blanks.forEach(key => {
-                    if (userInputs[key] !== currentQ.digits[key].toString()) {
-                        allCorrect = false;
-                    }
+                    if (userInputs[key] !== currentQ.digits[key].toString()) allCorrect = false;
                 });
 
                 if (allCorrect) {
+                    playSound('success');
                     setHistory([...history, { ...currentQ, passedFirstTry: true }]);
                     nextQuestion();
                 } else {
+                    playSound('error');
                     setMode('retry');
-                    setUserInputs({}); // 清空重做
+                    setUserInputs({});
                     setFeedback({ type: 'error', msg: '哎呀！有地方算錯了。我們重新來一次！' });
-                    
                     let newHistory = [...history];
                     const existing = newHistory.find(h => h.id === currentQ.id);
-                    if (!existing) {
-                        newHistory.push({ ...currentQ, passedFirstTry: false });
-                    }
+                    if (!existing) newHistory.push({ ...currentQ, passedFirstTry: false });
                     setHistory(newHistory);
                 }
             };
@@ -381,9 +427,9 @@
             return (
                 <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
                     {step === 'menu' && (
-                        <div className="text-center bg-white p-12 rounded-[3rem] shadow-2xl max-w-lg w-full">
-                            <h1 className="text-4xl font-black text-slate-800 mb-4">兩步直式特訓 (修復版)</h1>
-                            <p className="text-slate-500 mb-8 font-bold">已確保所有題目皆為唯一解</p>
+                        <div className="text-center bg-white p-12 rounded-[3rem] shadow-2xl max-w-lg w-full fade-in">
+                            <h1 className="text-4xl font-black text-slate-800 mb-4">兩步直式特訓 (終極版)</h1>
+                            <p className="text-slate-500 mb-8 font-bold">已確保唯一解 + 音效 + 慶祝動畫</p>
                             <button onClick={startQuiz} className="w-full bg-indigo-600 text-white py-6 rounded-2xl text-3xl font-black shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
                                 開始挑戰
                             </button>
