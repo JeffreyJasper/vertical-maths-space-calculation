@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jeremy 進階直式挑戰 V2.1</title>
+    <title>Jeremy 進階直式挑戰 V3.0 (嚴格邏輯版)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -21,14 +21,13 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef, memo } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
 
         const TOTAL_QUESTIONS = 10;
 
-        // --- 1. 獨立的計時器組件 (避免影響主畫面渲染) ---
+        // --- 獨立計時器 (防止閃爍) ---
         const TimerDisplay = ({ startTime, onTimeUpdate }) => {
             const [time, setTime] = useState(0);
-
             useEffect(() => {
                 if (!startTime) return;
                 const interval = setInterval(() => {
@@ -46,28 +45,24 @@
             );
         };
 
-        // --- 2. 單個數字格組件 (移出 App 外部) ---
+        // --- 單個數字格 ---
         const DigitSlot = ({ q, type, row, userInputs, mode, onInput }) => {
             const key = `${type}_${row}`;
             const isBlank = q.blanks.includes(key);
             const value = q.digits[key];
 
-            // 視覺優化：若百位數為0 (且該數值本身小於100)，隱藏它
-            // 這裡簡單判定：如果是 't' (十位) 且值為 0，且該位置不是必須填寫的空格，則隱藏
+            // 視覺優化：隱藏十位數的 0 (例如 05 -> 5)，除非它是答案格
             if (value === 0 && row === 't' && !isBlank) {
-                 // 檢查這是否真的是一個個位數 (例如 05)
-                 // 由於題目生成邏輯，我們簡單隱藏非空格的 leading zero
                  return <div className="w-12 h-14"></div>;
             }
 
             if (isBlank) {
                 const inputValue = userInputs[key] || '';
-                // Retry模式：若已答對(等於正確答案)，則鎖定
                 const isCorrect = inputValue === value.toString();
+                // Retry 模式下，答對的鎖定為綠色
                 const isLocked = mode === 'retry' && isCorrect;
                 
                 let borderClass = "border-blue-400 border-2 bg-white";
-                // Retry模式下，未鎖定(即錯誤或未填)的格子閃爍提示
                 if (mode === 'retry' && !isLocked) borderClass = "border-orange-400 border-4 bg-orange-50 animate-pulse"; 
                 if (isLocked) borderClass = "border-green-500 bg-green-50 text-green-600 border-2";
 
@@ -89,9 +84,8 @@
             }
         };
 
-        // --- 3. 問題卡片組件 (移出 App 外部) ---
+        // --- 問題卡片 ---
         const QuestionCard = ({ q, index, userInputs, mode, feedback, onInput, onSubmit, startTime }) => {
-            // 防止 q 為空時報錯
             if (!q) return null;
 
             return (
@@ -100,7 +94,6 @@
                         <span className="bg-slate-100 text-slate-600 px-4 py-1 rounded-full text-sm font-bold">
                             第 {index + 1} / {TOTAL_QUESTIONS} 題
                         </span>
-                        {/* 這裡引用獨立的 TimerDisplay */}
                         <TimerDisplay startTime={startTime} />
                     </div>
 
@@ -164,7 +157,7 @@
             );
         };
 
-        // --- 4. 報告卡片組件 ---
+        // --- 報告卡片 ---
         const ReportCard = ({ history, totalTime, onRestart }) => {
             const wrongQuestions = history.filter(h => !h.passedFirstTry);
             const score = Math.round(((TOTAL_QUESTIONS - wrongQuestions.length) / TOTAL_QUESTIONS) * 100);
@@ -172,7 +165,6 @@
             return (
                 <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-2xl mx-auto text-center fade-in">
                     <h2 className="text-4xl font-black text-slate-800 mb-6">測驗完成！</h2>
-                    
                     <div className="flex justify-center gap-6 mb-10">
                         <div className="bg-blue-50 p-6 rounded-2xl">
                             <p className="text-xs text-blue-400 font-bold uppercase">總時間</p>
@@ -183,7 +175,6 @@
                             <p className="text-4xl font-black text-indigo-900">{score}</p>
                         </div>
                     </div>
-
                     <div className="text-left mb-10">
                         <h3 className="text-xl font-bold text-slate-700 mb-4 border-b pb-2">表現分析：</h3>
                         {wrongQuestions.length === 0 ? (
@@ -202,7 +193,6 @@
                             </ul>
                         )}
                     </div>
-
                     <button onClick={onRestart} className="bg-slate-800 text-white px-8 py-4 rounded-2xl font-black text-xl hover:bg-slate-700 w-full">
                         返回主選單
                     </button>
@@ -210,7 +200,7 @@
             );
         };
 
-        // --- 5. 主應用程式 (管理狀態) ---
+        // --- 主程式邏輯 ---
         const App = () => {
             const [step, setStep] = useState('menu');
             const [qIndex, setQIndex] = useState(0);
@@ -222,43 +212,87 @@
             const [startTime, setStartTime] = useState(null);
             const [finalTime, setFinalTime] = useState(0);
 
-            // 隨機數生成邏輯
-            const generateQuestions = () => {
+            // *** 核心修復：具有唯一解驗證的題目生成器 ***
+            const generateQuestions = useCallback(() => {
                 let newQs = [];
                 for(let i=0; i<TOTAL_QUESTIONS; i++) {
-                    let n1, n2, n3, r1, r2, op1, op2;
-                    let valid = false;
-                    while(!valid) {
-                        n1 = Math.floor(Math.random() * 89) + 10; 
-                        op1 = Math.random() > 0.5 ? '+' : '-';
-                        n2 = Math.floor(Math.random() * 40) + 1;  
+                    let validPuzzle = false;
+                    let puzzleData = null;
+
+                    // 嘗試生成直到找到一個符合所有邏輯的題目
+                    while(!validPuzzle) {
+                        // 1. 生成基本數字
+                        let n1, n2, n3, r1, r2, op1, op2;
+                        let validNums = false;
                         
-                        r1 = op1 === '+' ? n1 + n2 : n1 - n2;
-                        if (r1 > 99 || r1 < 10) continue; 
+                        while(!validNums) {
+                            n1 = Math.floor(Math.random() * 89) + 10; 
+                            op1 = Math.random() > 0.5 ? '+' : '-';
+                            n2 = Math.floor(Math.random() * 40) + 1;  
+                            
+                            r1 = op1 === '+' ? n1 + n2 : n1 - n2;
+                            if (r1 > 99 || r1 < 10) continue; 
 
-                        op2 = Math.random() > 0.5 ? '+' : '-';
-                        n3 = Math.floor(Math.random() * 40) + 1;
-                        r2 = op2 === '+' ? r1 + n3 : r1 - n3;
-                        if (r2 > 0 && r2 < 100) valid = true; 
+                            op2 = Math.random() > 0.5 ? '+' : '-';
+                            n3 = Math.floor(Math.random() * 40) + 1;
+                            r2 = op2 === '+' ? r1 + n3 : r1 - n3;
+                            if (r2 > 0 && r2 < 100) validNums = true; 
+                        }
+
+                        const digits = {
+                            'n1_t': Math.floor(n1 / 10), 'n1_o': n1 % 10,
+                            'n2_t': Math.floor(n2 / 10), 'n2_o': n2 % 10,
+                            'r1_t': Math.floor(r1 / 10), 'r1_o': r1 % 10,
+                            'n3_t': Math.floor(n3 / 10), 'n3_o': n3 % 10,
+                            'r2_t': Math.floor(r2 / 10), 'r2_o': r2 % 10,
+                        };
+
+                        // 2. 智能挖空邏輯 (Smart Masking)
+                        // 定義四組約束關係 (Constraints)，每組代表一個直行的運算
+                        // 規則：每一組裡面，最多只能有 1 個空格
+                        const constraints = [
+                            ['n1_o', 'n2_o', 'r1_o'], // 第一步：個位
+                            ['n1_t', 'n2_t', 'r1_t'], // 第一步：十位
+                            ['r1_o', 'n3_o', 'r2_o'], // 第二步：個位
+                            ['r1_t', 'n3_t', 'r2_t']  // 第二步：十位
+                        ];
+
+                        const allKeys = Object.keys(digits);
+                        const shuffledKeys = allKeys.sort(() => 0.5 - Math.random());
+                        let currentBlanks = [];
+                        
+                        // 嘗試添加空格
+                        for (let key of shuffledKeys) {
+                            // 暫時加入這個空格
+                            const testBlanks = [...currentBlanks, key];
+                            
+                            // 檢查是否違反「唯一解」原則
+                            // 檢查每一組約束，如果某組內的空格數 > 1，則此空格無效
+                            const isAmbiguous = constraints.some(group => {
+                                const blanksInGroup = group.filter(k => testBlanks.includes(k));
+                                return blanksInGroup.length > 1;
+                            });
+
+                            if (!isAmbiguous) {
+                                currentBlanks.push(key);
+                            }
+                            
+                            // 限制最多 4 格，最少 2 格
+                            if (currentBlanks.length >= 4) break;
+                        }
+
+                        if (currentBlanks.length >= 2) {
+                            validPuzzle = true;
+                            puzzleData = { 
+                                id: i, n1, n2, n3, r1, r2, op1, op2, 
+                                digits, blanks: currentBlanks 
+                            };
+                        }
                     }
-
-                    const digits = {
-                        'n1_t': Math.floor(n1 / 10), 'n1_o': n1 % 10,
-                        'n2_t': Math.floor(n2 / 10), 'n2_o': n2 % 10,
-                        'r1_t': Math.floor(r1 / 10), 'r1_o': r1 % 10,
-                        'n3_t': Math.floor(n3 / 10), 'n3_o': n3 % 10,
-                        'r2_t': Math.floor(r2 / 10), 'r2_o': r2 % 10,
-                    };
-
-                    const blankCount = Math.floor(Math.random() * 3) + 2; 
-                    const allKeys = Object.keys(digits);
-                    const shuffledKeys = allKeys.sort(() => 0.5 - Math.random());
-                    const blanks = shuffledKeys.slice(0, blankCount);
-
-                    newQs.push({ id: i, n1, n2, n3, r1, r2, op1, op2, digits, blanks });
+                    newQs.push(puzzleData);
                 }
                 return newQs;
-            };
+            }, []);
 
             const startQuiz = () => {
                 setQuestions(generateQuestions());
@@ -283,14 +317,16 @@
                     if (num === correctVal) {
                         setUserInputs(prev => ({ ...prev, [key]: num }));
                         setFeedback({ type: 'success', msg: '正確！請填下一格。' });
+                        // 檢查本題是否剩餘未填
                         const remaining = currentQ.blanks.filter(b => b !== key && userInputs[b] !== currentQ.digits[b].toString());
                         if (remaining.length === 0) {
-                            setTimeout(() => nextQuestion(), 800);
+                            setTimeout(() => nextQuestion(), 500);
                         }
                     } else {
                         let hint = "再算一次看看？";
+                        // 簡單提示邏輯
                         if (key.includes('_o')) hint = "提示：先算個位數 (最右邊)。";
-                        if (key.includes('_t')) hint = "提示：留意進位或退位！";
+                        else hint = "提示：留意有沒有進位或退位？";
                         setFeedback({ type: 'error', msg: `不對喔！${hint}` });
                     }
                 }
@@ -300,6 +336,13 @@
                 const currentQ = questions[qIndex];
                 let allCorrect = true;
                 
+                // 檢查是否所有格都已填
+                const allFilled = currentQ.blanks.every(key => userInputs[key] && userInputs[key].length > 0);
+                if (!allFilled) {
+                    setFeedback({ type: 'error', msg: '還有格子沒填喔！' });
+                    return;
+                }
+
                 currentQ.blanks.forEach(key => {
                     if (userInputs[key] !== currentQ.digits[key].toString()) {
                         allCorrect = false;
@@ -311,7 +354,7 @@
                     nextQuestion();
                 } else {
                     setMode('retry');
-                    setUserInputs({});
+                    setUserInputs({}); // 清空重做
                     setFeedback({ type: 'error', msg: '哎呀！有地方算錯了。我們重新來一次！' });
                     
                     let newHistory = [...history];
@@ -339,13 +382,8 @@
                 <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
                     {step === 'menu' && (
                         <div className="text-center bg-white p-12 rounded-[3rem] shadow-2xl max-w-lg w-full">
-                            <h1 className="text-4xl font-black text-slate-800 mb-4">兩步直式特訓</h1>
-                            <p className="text-slate-500 mb-8 font-bold">格式：34 + 12 - 14 (連續運算)</p>
-                            <div className="space-y-4 text-left bg-slate-50 p-6 rounded-2xl mb-8 border border-slate-100">
-                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">1</span> 隨機 2-4 個空格</p>
-                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">2</span> 全部填完才按提交</p>
-                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">3</span> 答錯會有即時引導</p>
-                            </div>
+                            <h1 className="text-4xl font-black text-slate-800 mb-4">兩步直式特訓 (修復版)</h1>
+                            <p className="text-slate-500 mb-8 font-bold">已確保所有題目皆為唯一解</p>
                             <button onClick={startQuiz} className="w-full bg-indigo-600 text-white py-6 rounded-2xl text-3xl font-black shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
                                 開始挑戰
                             </button>
