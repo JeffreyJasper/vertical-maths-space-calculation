@@ -2,213 +2,379 @@
 <html lang="zh-HK">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jeremy 數學偵探 V6.0 - 極限挑戰</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jeremy 進階直式挑戰</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@900&family=Roboto+Mono:wght@700&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f1f5f9; user-select: none; }
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&family=Roboto+Mono:wght@500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f0f9ff; touch-action: manipulation; }
         .math-font { font-family: 'Roboto Mono', monospace; }
-        .grid-vertical { display: grid; grid-template-columns: 3rem 4rem 4rem 4rem; align-items: center; justify-items: center; }
+        /* 隱藏數字輸入框的箭頭 */
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback } = React;
+        const { useState, useEffect, useRef } = React;
 
+        // --- 設定與常數 ---
+        const TOTAL_QUESTIONS = 10;
+        
+        // --- 核心組件 ---
         const App = () => {
-            const [problem, setProblem] = useState(null);
-            const [blankSteps, setBlankSteps] = useState([]); // 存放 4 個挖空的位置資訊
-            const [currentStepIdx, setCurrentStepIdx] = useState(0); // 當前填到第幾個空格
-            const [isFinished, setIsFinished] = useState(false);
-            const [message, setMessage] = useState("找出隱藏的數字！");
+            const [step, setStep] = useState('menu'); // menu, quiz, report
+            const [qIndex, setQIndex] = useState(0);
+            const [questions, setQuestions] = useState([]);
+            const [userInputs, setUserInputs] = useState({});
+            const [mode, setMode] = useState('normal'); // 'normal' (考試模式) | 'retry' (訂正/指導模式)
+            const [feedback, setFeedback] = useState(null);
+            const [history, setHistory] = useState([]);
+            const [startTime, setStartTime] = useState(null);
+            const [elapsedTime, setElapsedTime] = useState(0);
+            const timerRef = useRef(null);
 
-            // 生成題目的核心邏輯
-            const generateProblem = useCallback(() => {
-                const types = ['ADD_2', 'SUB_2', 'ADD_3', 'MIXED_3'];
-                const type = types[Math.floor(Math.random() * types.length)];
-                
-                let rows = []; // 每行存 [百位, 十位, 個位]
-                let symbols = [""];
-                let resultVal = 0;
+            // 隨機數生成器 (避免 0 開頭，處理進退位)
+            const generateQuestions = () => {
+                let newQs = [];
+                for(let i=0; i<TOTAL_QUESTIONS; i++) {
+                    // 邏輯： N1 (op1) N2 = R1, R1 (op2) N3 = R2
+                    // 確保中間值 R1 和最終值 R2 都在 0-99 之間，且不為負
+                    let n1, n2, n3, r1, r2, op1, op2;
+                    let valid = false;
+                    while(!valid) {
+                        n1 = Math.floor(Math.random() * 89) + 10; // 10-99
+                        op1 = Math.random() > 0.5 ? '+' : '-';
+                        n2 = Math.floor(Math.random() * 40) + 1;  // 1-40
+                        
+                        r1 = op1 === '+' ? n1 + n2 : n1 - n2;
+                        
+                        if (r1 > 99 || r1 < 10) continue; // 確保 R1 是兩位數
 
-                if (type === 'ADD_2') {
-                    const n1 = Math.floor(Math.random() * 60) + 10;
-                    const n2 = Math.floor(Math.random() * 30) + 9;
-                    resultVal = n1 + n2;
-                    rows = [splitNum(n1), splitNum(n2)];
-                    symbols = ["", "+"];
-                } else if (type === 'SUB_2') {
-                    const n1 = Math.floor(Math.random() * 50) + 40;
-                    const n2 = Math.floor(Math.random() * 30) + 5;
-                    resultVal = n1 - n2;
-                    rows = [splitNum(n1), splitNum(n2)];
-                    symbols = ["", "-"];
-                } else if (type === 'ADD_3') {
-                    const n1 = Math.floor(Math.random() * 20) + 5;
-                    const n2 = Math.floor(Math.random() * 20) + 5;
-                    const n3 = Math.floor(Math.random() * 20) + 5;
-                    resultVal = n1 + n2 + n3;
-                    rows = [splitNum(n1), splitNum(n2), splitNum(n3)];
-                    symbols = ["", "+", "+"];
-                } else {
-                    const n1 = Math.floor(Math.random() * 50) + 30;
-                    const n2 = Math.floor(Math.random() * 20) + 10;
-                    const n3 = Math.floor(Math.random() * 10) + 5;
-                    resultVal = n1 + n2 - n3;
-                    rows = [splitNum(n1), splitNum(n2), splitNum(n3)];
-                    symbols = ["", "+", "-"];
-                }
+                        op2 = Math.random() > 0.5 ? '+' : '-';
+                        n3 = Math.floor(Math.random() * 40) + 1;
 
-                const resultRow = splitNum(resultVal);
-                
-                // 收集所有可以挖空的位置 (排除百位是 0 的情況)
-                let candidates = [];
-                rows.forEach((r, rIdx) => {
-                    r.forEach((v, cIdx) => candidates.push({ type: 'row', rIdx, cIdx, val: v }));
-                });
-                resultRow.forEach((v, cIdx) => candidates.push({ type: 'res', rIdx: -1, cIdx, val: v }));
+                        r2 = op2 === '+' ? r1 + n3 : r1 - n3;
 
-                // 隨機選 4 個空格
-                const shuffled = candidates.sort(() => 0.5 - Math.random());
-                const selectedBlanks = shuffled.slice(0, 4).sort((a, b) => b.cIdx - a.cIdx); // 從個位(cIdx=2)往百位填
-
-                setProblem({ rows, symbols, resultRow, type });
-                setBlankSteps(selectedBlanks);
-                setCurrentStepIdx(0);
-                setIsFinished(false);
-                setMessage("偵探，請破解這 4 個數字！");
-            }, []);
-
-            const splitNum = (n) => [
-                Math.floor(n / 100), 
-                Math.floor((n % 100) / 10), 
-                n % 10
-            ];
-
-            useEffect(() => { generateProblem(); }, [generateProblem]);
-
-            const handleInput = (num) => {
-                if (isFinished) return;
-                
-                const currentBlank = blankSteps[currentStepIdx];
-                if (num === currentBlank.val) {
-                    if (currentStepIdx === 3) {
-                        setIsFinished(true);
-                        setMessage("太棒了！全部正確！🏆");
-                    } else {
-                        setCurrentStepIdx(prev => prev + 1);
-                        setMessage("答對了，繼續下一個！");
+                        if (r2 > 0 && r2 < 100) valid = true; // 確保 R2 合法
                     }
+
+                    // 將所有數字拆解為位數 ID
+                    const digits = {
+                        'n1_t': Math.floor(n1 / 10), 'n1_o': n1 % 10,
+                        'n2_t': Math.floor(n2 / 10), 'n2_o': n2 % 10,
+                        'r1_t': Math.floor(r1 / 10), 'r1_o': r1 % 10,
+                        'n3_t': Math.floor(n3 / 10), 'n3_o': n3 % 10,
+                        'r2_t': Math.floor(r2 / 10), 'r2_o': r2 % 10,
+                    };
+
+                    // 決定挖空數量 (2-4格)
+                    const blankCount = Math.floor(Math.random() * 3) + 2; 
+                    const allKeys = Object.keys(digits);
+                    const shuffledKeys = allKeys.sort(() => 0.5 - Math.random());
+                    const blanks = shuffledKeys.slice(0, blankCount);
+
+                    newQs.push({
+                        id: i,
+                        n1, n2, n3, r1, r2, op1, op2,
+                        digits,
+                        blanks,
+                        mistakes: 0
+                    });
+                }
+                return newQs;
+            };
+
+            // 計時器
+            useEffect(() => {
+                if (step === 'quiz') {
+                    setStartTime(Date.now());
+                    timerRef.current = setInterval(() => {
+                        setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
+                    }, 1000);
                 } else {
-                    setMessage("哎呀，數字不對，再算算看！❌");
+                    clearInterval(timerRef.current);
+                }
+                return () => clearInterval(timerRef.current);
+            }, [step, startTime]);
+
+            const startQuiz = () => {
+                setQuestions(generateQuestions());
+                setQIndex(0);
+                setHistory([]);
+                setUserInputs({});
+                setMode('normal');
+                setFeedback(null);
+                setStep('quiz');
+                setElapsedTime(0);
+                setStartTime(Date.now());
+            };
+
+            const handleInput = (key, val) => {
+                // 限制只能輸入一位數字
+                const num = val.slice(-1).replace(/[^0-9]/g, '');
+                
+                if (mode === 'normal') {
+                    setUserInputs(prev => ({ ...prev, [key]: num }));
+                } else if (mode === 'retry') {
+                    // 訂正模式：即時檢查
+                    const currentQ = questions[qIndex];
+                    const correctVal = currentQ.digits[key].toString();
+                    
+                    if (num === correctVal) {
+                        setUserInputs(prev => ({ ...prev, [key]: num }));
+                        setFeedback({ type: 'success', msg: '正確！請填下一格。' });
+                        // 檢查是否全部完成
+                        const remaining = currentQ.blanks.filter(b => b !== key && userInputs[b] !== currentQ.digits[b].toString());
+                        if (remaining.length === 0) {
+                            setTimeout(() => nextQuestion(), 800);
+                        }
+                    } else {
+                         // 錯誤提示邏輯
+                        let hint = "再算一次看看？";
+                        if (key.includes('_o')) hint = "提示：先算個位數 (最右邊)。";
+                        if (key.includes('_t')) hint = "提示：別忘了有沒有進位或退位喔！";
+                        setFeedback({ type: 'error', msg: `不對喔！${hint}` });
+                        // 震動效果可在此加入
+                    }
                 }
             };
 
-            if (!problem) return null;
+            const submitNormal = () => {
+                const currentQ = questions[qIndex];
+                let allCorrect = true;
+                
+                // 檢查所有格子
+                currentQ.blanks.forEach(key => {
+                    if (userInputs[key] !== currentQ.digits[key].toString()) {
+                        allCorrect = false;
+                    }
+                });
 
-            return (
-                <div className="min-h-screen flex flex-col items-center justify-center p-4">
-                    <div className="bg-white p-8 rounded-[3rem] shadow-2xl border border-slate-200 w-full max-w-md">
-                        <div className="text-center mb-6">
-                            <span className="bg-indigo-100 text-indigo-600 px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest">
-                                {problem.type.replace('_', ' ')}
+                if (allCorrect) {
+                    setHistory([...history, { ...currentQ, passedFirstTry: true }]);
+                    nextQuestion();
+                } else {
+                    // 進入訂正模式
+                    setMode('retry');
+                    // 清空所有輸入，讓學生重做
+                    setUserInputs({});
+                    setFeedback({ type: 'error', msg: '哎呀！有地方算錯了。我們重新來一次，系統會一步步帶你做。' });
+                    // 記錄錯誤
+                    let newHistory = [...history];
+                    const existing = newHistory.find(h => h.id === currentQ.id);
+                    if (!existing) {
+                        newHistory.push({ ...currentQ, passedFirstTry: false });
+                    }
+                    setHistory(newHistory);
+                }
+            };
+
+            const nextQuestion = () => {
+                if (qIndex < TOTAL_QUESTIONS - 1) {
+                    setQIndex(prev => prev + 1);
+                    setUserInputs({});
+                    setMode('normal');
+                    setFeedback(null);
+                } else {
+                    setStep('report');
+                }
+            };
+
+            // --- 渲染子組件 ---
+
+            // 單個數字格 (或輸入框)
+            const DigitSlot = ({ q, type, row }) => {
+                const key = `${type}_${row}`; // e.g., n1_t, r1_o
+                const isBlank = q.blanks.includes(key);
+                const value = q.digits[key];
+                
+                // 處理百位數為 0 不顯示的情況 (雖然題目設定為兩位數，但以防萬一)
+                if (value === 0 && row === 't') {
+                   // 若該行數值小於10，且這是十位數，則隱藏 (視覺優化)
+                   // 但這裡題目生成邏輯保證大部分是兩位數。
+                   // 這裡簡單處理：如果是0且是十位數，通常不顯示leading zero
+                   // 但如果是中間結果 R1, R2 是個位數 (e.g. 5)，十位是0，則應隱藏
+                   const fullValKey = type; // n1, n2...
+                   // if (q[fullValKey] < 10) return <div className="w-12 h-14"></div>;
+                }
+
+                if (isBlank) {
+                    // 如果是輸入框
+                    const inputValue = userInputs[key] || '';
+                    // 在 Retry 模式，鎖定已答對的，聚焦未答對的
+                    const isLocked = mode === 'retry' && inputValue === value.toString();
+                    
+                    let borderClass = "border-blue-400 border-2 bg-white";
+                    if (mode === 'retry' && !isLocked) borderClass = "border-orange-400 border-4 bg-orange-50 animate-pulse"; 
+                    if (isLocked) borderClass = "border-green-500 bg-green-50 text-green-600 border-2";
+
+                    return (
+                        <input 
+                            type="tel" 
+                            value={inputValue}
+                            readOnly={isLocked}
+                            onChange={(e) => handleInput(key, e.target.value)}
+                            className={`w-12 h-14 text-center text-3xl font-bold rounded-lg shadow-inner outline-none transition-all math-font ${borderClass}`}
+                        />
+                    );
+                } else {
+                    // 純顯示數字
+                    return (
+                        <div className="w-12 h-14 flex items-center justify-center text-4xl font-black text-slate-700 math-font">
+                            {value}
+                        </div>
+                    );
+                }
+            };
+
+            const QuestionCard = () => {
+                const q = questions[qIndex];
+                if (!q) return null;
+
+                return (
+                    <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-xl border border-slate-200 max-w-md mx-auto fade-in">
+                        {/* 狀態列 */}
+                        <div className="flex justify-between items-center mb-8 border-b pb-4">
+                            <span className="bg-slate-100 text-slate-600 px-4 py-1 rounded-full text-sm font-bold">
+                                第 {qIndex + 1} / {TOTAL_QUESTIONS} 題
                             </span>
-                            <h2 className="text-xl font-black text-slate-800 mt-2">{message}</h2>
+                            <span className="font-mono text-slate-400 font-bold">{Math.floor(elapsedTime / 60)}:{(elapsedTime % 60).toString().padStart(2, '0')}</span>
                         </div>
 
-                        {/* 直式主體 */}
-                        <div className="flex justify-center mb-8">
-                            <div className="grid-vertical gap-y-2">
-                                {/* 題目列 */}
-                                {problem.rows.map((row, rIdx) => (
-                                    <React.Fragment key={rIdx}>
-                                        <div className="text-3xl font-black text-slate-400 math-font">{problem.symbols[rIdx]}</div>
-                                        {row.map((val, cIdx) => (
-                                            <Cell 
-                                                key={`${rIdx}-${cIdx}`}
-                                                val={val} 
-                                                isBlank={blankSteps.some(b => b.type==='row' && b.rIdx===rIdx && b.cIdx===cIdx)}
-                                                isTarget={!isFinished && blankSteps[currentStepIdx]?.type==='row' && blankSteps[currentStepIdx]?.rIdx===rIdx && blankSteps[currentStepIdx]?.cIdx===cIdx}
-                                                isFilled={blankSteps.findIndex(b => b.type==='row' && b.rIdx===rIdx && b.cIdx===cIdx) < currentStepIdx || isFinished}
-                                            />
-                                        ))}
-                                    </React.Fragment>
-                                ))}
+                        {/* 直式運算區 */}
+                        <div className="flex flex-col items-center">
+                            <div className="grid grid-cols-[2rem_3.5rem_3.5rem] gap-y-2 gap-x-1 items-center">
+                                {/* Row 1: N1 */}
+                                <div></div>
+                                <DigitSlot q={q} type="n1" row="t" />
+                                <DigitSlot q={q} type="n1" row="o" />
 
-                                {/* 底線 */}
-                                <div className="col-span-4 w-full border-b-8 border-slate-800 my-2 rounded-full" />
+                                {/* Row 2: Op1 N2 */}
+                                <div className="text-3xl font-bold text-slate-400 text-center">{q.op1}</div>
+                                <DigitSlot q={q} type="n2" row="t" />
+                                <DigitSlot q={q} type="n2" row="o" />
 
-                                {/* 結果列 */}
-                                <div className="text-3xl font-black text-slate-800">=</div>
-                                {problem.resultRow.map((val, cIdx) => (
-                                    <Cell 
-                                        key={`res-${cIdx}`}
-                                        val={val} 
-                                        isBlank={blankSteps.some(b => b.type==='res' && b.cIdx===cIdx)}
-                                        isTarget={!isFinished && blankSteps[currentStepIdx]?.type==='res' && blankSteps[currentStepIdx]?.cIdx===cIdx}
-                                        isFilled={blankSteps.findIndex(b => b.type==='res' && b.cIdx===cIdx) < currentStepIdx || isFinished}
-                                    />
-                                ))}
+                                {/* Line 1 */}
+                                <div className="col-span-3 h-1 bg-slate-800 rounded-full my-1"></div>
+
+                                {/* Row 3: R1 (中間結果) */}
+                                <div></div>
+                                <DigitSlot q={q} type="r1" row="t" />
+                                <DigitSlot q={q} type="r1" row="o" />
+
+                                {/* Row 4: Op2 N3 */}
+                                <div className="text-3xl font-bold text-slate-400 text-center">{q.op2}</div>
+                                <DigitSlot q={q} type="n3" row="t" />
+                                <DigitSlot q={q} type="n3" row="o" />
+
+                                {/* Line 2 */}
+                                <div className="col-span-3 h-1 bg-slate-800 rounded-full my-1"></div>
+
+                                {/* Row 5: R2 (最終結果) */}
+                                <div></div>
+                                <DigitSlot q={q} type="r2" row="t" />
+                                <DigitSlot q={q} type="r2" row="o" />
                             </div>
                         </div>
 
-                        {/* 數字按鈕 */}
-                        <div className="grid grid-cols-5 gap-3">
-                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map(n => (
-                                <button
-                                    key={n}
-                                    onClick={() => handleInput(n)}
-                                    className="h-14 bg-indigo-600 hover:bg-indigo-700 active:scale-90 text-white text-2xl font-black rounded-2xl shadow-lg transition-all"
-                                >
-                                    {n}
-                                </button>
-                            ))}
+                        {/* 反饋區 */}
+                        <div className="mt-8 min-h-[4rem]">
+                            {feedback && (
+                                <div className={`p-4 rounded-xl text-center font-bold text-lg animate-bounce ${feedback.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                                    {feedback.msg}
+                                </div>
+                            )}
                         </div>
 
-                        {isFinished && (
+                        {/* 操作按鈕 */}
+                        {mode === 'normal' && (
                             <button 
-                                onClick={generateProblem}
-                                className="w-full mt-8 bg-green-500 hover:bg-green-600 text-white py-5 rounded-2xl font-black text-2xl shadow-xl transition-all animate-bounce"
+                                onClick={submitNormal}
+                                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-2xl font-black py-4 rounded-2xl shadow-lg transition-all active:scale-95"
                             >
-                                下一個挑戰 ➔
+                                提交答案
                             </button>
                         )}
+                        {mode === 'retry' && (
+                            <div className="text-center text-slate-400 text-sm font-bold">
+                                正在訂正模式：請填寫閃爍的格子
+                            </div>
+                        )}
                     </div>
-                </div>
-            );
-        };
+                );
+            };
 
-        // 格子組件
-        const Cell = ({ val, isBlank, isTarget, isFilled }) => {
-            // 處理百位數為 0 不顯示的情況
-            if (val === 0 && !isBlank && !isFilled) {
-                return <div className="w-12 h-16" />;
-            }
+            const ReportCard = () => {
+                const wrongQuestions = history.filter(h => !h.passedFirstTry);
+                const score = Math.round(((TOTAL_QUESTIONS - wrongQuestions.length) / TOTAL_QUESTIONS) * 100);
 
-            let style = "bg-white border-slate-200 text-slate-800";
-            let content = val;
+                return (
+                    <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-2xl mx-auto text-center fade-in">
+                        <h2 className="text-4xl font-black text-slate-800 mb-6">測驗完成！</h2>
+                        
+                        <div className="flex justify-center gap-6 mb-10">
+                            <div className="bg-blue-50 p-6 rounded-2xl">
+                                <p className="text-xs text-blue-400 font-bold uppercase">總時間</p>
+                                <p className="text-3xl font-black text-blue-900">{elapsedTime} 秒</p>
+                            </div>
+                            <div className="bg-indigo-50 p-6 rounded-2xl">
+                                <p className="text-xs text-indigo-400 font-bold uppercase">分數</p>
+                                <p className="text-4xl font-black text-indigo-900">{score}</p>
+                            </div>
+                        </div>
 
-            if (isBlank) {
-                if (isTarget) {
-                    style = "bg-amber-50 border-amber-400 animate-pulse text-amber-600 shadow-inner";
-                    content = "?";
-                } else if (isFilled) {
-                    style = "bg-green-50 border-green-500 text-green-600 font-black";
-                    content = val;
-                } else {
-                    style = "bg-slate-100 border-slate-200 text-transparent";
-                }
-            }
+                        <div className="text-left mb-10">
+                            <h3 className="text-xl font-bold text-slate-700 mb-4 border-b pb-2">表現分析：</h3>
+                            {wrongQuestions.length === 0 ? (
+                                <p className="text-green-600 font-bold text-lg text-center">🎉 太強了！全部答對！</p>
+                            ) : (
+                                <ul className="space-y-4 max-h-64 overflow-y-auto custom-scrollbar">
+                                    {wrongQuestions.map((q, i) => (
+                                        <li key={i} className="bg-red-50 p-4 rounded-xl border border-red-100">
+                                            <div className="font-bold text-red-800 mb-1">第 {q.id + 1} 題需複習：</div>
+                                            <div className="font-mono text-slate-600 text-lg">
+                                                {q.n1} {q.op1} {q.n2} = {q.r1} <br/>
+                                                {q.r1} {q.op2} {q.n3} = {q.r2}
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+
+                        <button onClick={() => setStep('menu')} className="bg-slate-800 text-white px-8 py-4 rounded-2xl font-black text-xl hover:bg-slate-700 w-full">
+                            返回主選單
+                        </button>
+                    </div>
+                );
+            };
 
             return (
-                <div className={`w-12 h-16 flex items-center justify-center border-4 rounded-xl text-4xl font-black math-font transition-all duration-300 ${style}`}>
-                    {content}
+                <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
+                    {step === 'menu' && (
+                        <div className="text-center bg-white p-12 rounded-[3rem] shadow-2xl max-w-lg w-full">
+                            <h1 className="text-4xl font-black text-slate-800 mb-4">兩步直式特訓</h1>
+                            <p className="text-slate-500 mb-8 font-bold">格式：34 + 12 - 14 (連續運算)</p>
+                            <div className="space-y-4 text-left bg-slate-50 p-6 rounded-2xl mb-8 border border-slate-100">
+                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">1</span> 隨機 2-4 個空格</p>
+                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">2</span> 全部填完才按提交</p>
+                                <p className="flex items-center gap-3 font-bold text-slate-600"><span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs">3</span> 答錯會有即時引導</p>
+                            </div>
+                            <button onClick={startQuiz} className="w-full bg-indigo-600 text-white py-6 rounded-2xl text-3xl font-black shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
+                                開始挑戰
+                            </button>
+                        </div>
+                    )}
+
+                    {step === 'quiz' && <QuestionCard />}
+                    {step === 'report' && <ReportCard />}
                 </div>
             );
         };
